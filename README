@@ -1,0 +1,4 @@
+Example:
+    ./fat16dir.py /dev/sdb1 /d/Bioshock\ Licensed\ Soundtrack | \
+        tail -n+3 | tr \' \" | sort -n -t \" -k2 | awk '{print $2}' | \
+        ../topla/topla.py >/mnt/winstick/d/bioshock-licensed.pla

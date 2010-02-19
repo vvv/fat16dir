@@ -188,7 +188,7 @@ def ls_dirents(br, de_list, base_path = None):
             else: s = ""
             if base_path is None: name = de['name']
             else: name = os.path.join(base_path, de['name'])
-            print '%5s +%08X%s %s' % (de['attrs'], de['offs'], s, name)
+            print '%5s +%08X%s %r' % (de['attrs'], de['offs'], s, name)
 
 def _ls_path(br, dir_cache, path_head_str, path_tail_list):
     global opts
@@ -248,7 +248,12 @@ if __name__ == '__main__':
     if len(args) == 1:
         args.append("/")
         opts.recurse = True
-    if len(args) < 2: op.error("incorrect number of arguments")
+    try: args[1]
+    except IndexError:
+        print >>sys.stderr, """Insufficient number of non-optional arguments.
+Type `%s -h' for usage.""" % sys.argv[0]
+        sys.exit(1)
+
     f = file(args[0], 'r')
     br_buf = f.read(512)
     br = parse(BR_DICT, br_buf)
