@@ -99,7 +99,7 @@ def get_dirents(d_chain):
     cur_lfn_cksum = cur_lfn_maxnum = cur_lfn_offs = None
 
     for i in range(de_cnt):
-        de_buf = d_chain.read(i * 32, 32)
+        de_buf = d_chain.read(i*32, 32)
         if de_buf == '\0' * 32:
             break
 
@@ -207,46 +207,32 @@ def get_clist(br, de):
 def ls_dirents(br, de_list, base_path=None):
     global opts
     for de in de_list:
-        if de['type'] in ('deld', 'delf', 'deln', 'lfn'):
-            continue
-
         # Dir/file/volume label
+        sz = ''
         if opts.size == 'bytes':
-            s = ' %10i' % de['size']
+            sz = ' %10i' % de['size']
         elif opts.size == 'clusters':
-            s = ' %5i' % len(get_clist(br, de))
+            sz = ' %5i' % len(get_clist(br, de))
         elif opts.size == 'sectors':
-            s = ' %8i' % (len(get_clist(br, de)) * br['spc'])
-        else:
-            s = ''
+            sz = ' %8i' % (len(get_clist(br, de)) * br['spc'])
 
         if base_path is None:
             name = de['name']
         else:
             name = os.path.join(base_path, de['name'])
 
-        print '%5s +%08X%s %s' % \
-            (de['attrs'], de['offs'], s, name.encode('utf8'))
+        print '%5s +%08x%s %s' % (
+            de['attrs'], de['offs'], sz, name.encode('utf8'))
 
 def _ls_path(br, dir_cache, path_head_str, path_tail_list):
     global opts
-    de_list = get_dirents(dir_cache[path_head_str])
-    if not path_tail_list:
-        if not opts.recurse:
-            return ls_dirents(br, de_list)
+    de_list = filter(lambda x: x['type'] not in ('deld','delf','deln','lfn'),
+                     get_dirents(dir_cache[path_head_str]))
 
-        for de in de_list:
-            ls_dirents(br, [de], path_head_str)
-            if de['type'] == 'dir' and de['name'] not in ('.', '..'):
-                de_clist = get_clist(br, de)
-                path_de_str = os.path.join(path_head_str, de['name'])
-                if path_de_str not in dir_cache:
-                    de_cchain = BChain(br['dev'], blist=de_clist,
-                                       bsize=br['spc']*br['bps'],
-                                       boffs=br['c0offs'])
-                    dir_cache[path_de_str] = de_cchain
-                _ls_path(br, dir_cache, path_de_str, [])
-    else:
+    # sort dentries alphabetically
+    de_list.sort(key=lambda x: x['name'])
+
+    if path_tail_list:
         p, path_tail_list = path_tail_list[0], path_tail_list[1:]
         path_head_str0 = path_head_str
         path_head_str = os.path.join(path_head_str, p)
@@ -265,6 +251,21 @@ def _ls_path(br, dir_cache, path_head_str, path_tail_list):
                     dir_cache[path_head_str] = de_cchain
                 return _ls_path(br, dir_cache, path_head_str, path_tail_list)
         print 'ERROR: "%s" does not exist' % path_head_str
+    else:
+        if not opts.recurse:
+            return ls_dirents(br, de_list)
+
+        for de in de_list:
+            ls_dirents(br, [de], path_head_str)
+            if de['type'] == 'dir' and de['name'] not in ('.', '..'):
+                de_clist = get_clist(br, de)
+                path_de_str = os.path.join(path_head_str, de['name'])
+                if path_de_str not in dir_cache:
+                    de_cchain = BChain(br['dev'], blist=de_clist,
+                                       bsize=br['spc']*br['bps'],
+                                       boffs=br['c0offs'])
+                    dir_cache[path_de_str] = de_cchain
+                _ls_path(br, dir_cache, path_de_str, [])
 
 def ls_path(br, dir_cache, path_str):
     splitpath = os.path.normcase(os.path.normpath(path_str)).split(os.path.sep)
@@ -323,7 +324,6 @@ Type `%s -h' for usage.""" % sys.argv[0]
 
     if not args:
         args.append(os.path.sep)
-        opts.recurse = True
 
     br = populate_br(file(dev))
 
