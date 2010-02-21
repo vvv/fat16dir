@@ -39,7 +39,7 @@ ATTR2MASK_MAP = dict(ATTR_MASK_LIST)
 
 def parse(fmt_dict, buf):
     d = {}
-    for (k, v) in fmt_dict.iteritems():
+    for k, v in fmt_dict.iteritems():
         d[k] = struct.unpack(v[2], buf[v[0]:v[0]+v[1]])[0]
     return d
 
@@ -65,7 +65,7 @@ class BChain(object):
         buf = ''
         n, p = divmod(pos, self.bsize)
         o = self.boffs + self.blist[n]*self.bsize + p
-        f.seek(o, os.SEEK_SET)
+        self.f.seek(o, os.SEEK_SET)
 
         # limit the requested size:
         if p + size > self.bsize:
@@ -73,7 +73,7 @@ class BChain(object):
 
         # read until success or EOF:
         while len(buf) < size:
-            b = f.read(size - len(buf))
+            b = self.f.read(size - len(buf))
             if b == '':
                 raise IOError("EOF at sector #%i, byte #%i" % (
                         self.blist[n], p + len(buf)))
@@ -274,59 +274,63 @@ def ls_path(br, dir_cache, path_str):
         splitpath.pop()
     return _ls_path(br, dir_cache, os.path.sep, splitpath)
 
+def populate_br(f): # XXX What does `br' stand for?  --vvv
+    br = parse(BR_DICT, f.read(512))
+    br['dev'] = f
+    assert(br['magic'] == 0xaa55)
+    assert(br['bps'] in (256, 512, 2048))
+
+    # byte offsets of FAT1, FAT2 & so on
+    # (in fact, never saw more than two FATs on disk)
+    for i in range(1, br['n_fats'] + 1):
+        br['fat%ioffs' % i] = br['rsvd_sects'] * br['bps'] + \
+            i * br['spf'] * br['bps']
+
+    # bytes per root directory
+    br['bprd'] = br['rdents'] * 32
+
+    # sectors per root directory
+    br['sprd'] = (br['bprd'] + br['bps'] - 1) / br['bps']
+
+    # byte offset of root directory
+    br['rd_offs'] = (br['rsvd_sects'] + br['n_fats'] * br['spf']) * br['bps']
+
+    # byte offsets of cluster #2 and cluster #0
+    br['c2offs'] = br['rd_offs'] + br['sprd'] * br['bps']
+    br['c0offs'] = br['c2offs'] - 2 * br['spc'] * br['bps']
+
+    return br
+
+# ----------------------------------------------------------------------
 if __name__ == '__main__':
     global opts
-    op = optparse.OptionParser(
-        'USAGE: %prog [options] <dev> <path1> [<path2> ...]')
+    op = optparse.OptionParser('USAGE: %prog [OPTION]... DEV [PATH]...')
     op.add_option('-b', '--byte', dest='size', action='store_const',
-                  help='print size in bytes', const='bytes')
+                  const='bytes', help='print size in bytes')
     op.add_option('-c', '--clusters', dest='size', action='store_const',
-                  help='print size in clusters', const='clusters')
+                  const='clusters', help='print size in clusters')
     op.add_option('-s', '--sectors', dest='size', action='store_const',
-                  help='print size in sectors', const='sectors')
+                  const='sectors', help='print size in sectors')
     op.add_option('-r', '--recurse', dest='recurse', action='store_true',
                   help='recurse into directories like find does')
     (opts, args) = op.parse_args()
 
-    if len(args) == 1:
-        args.append('/')
-        opts.recurse = True
-    try: args[1]
+    try: dev = args.pop(0) # exclude dev from args
     except IndexError:
         print >>sys.stderr, """Insufficient number of non-optional arguments.
 Type `%s -h' for usage.""" % sys.argv[0]
         sys.exit(1)
 
-    f = file(args[0], 'r')
-    br_buf = f.read(512)
-    br = parse(BR_DICT, br_buf)
-    assert(br['magic'] == 0xaa55)
-    assert(br['bps'] in (256, 512, 2048))
-    br['dev'] = f
+    if not args:
+        args.append(os.path.sep)
+        opts.recurse = True
 
-    # byte offsets of FAT1, FAT2 & so on
-    # (in fact, never saw more than two FATs on disk):
-    for i in range(1, br['n_fats'] + 1):
-        br['fat%ioffs' % i] = br['rsvd_sects'] * br['bps']\
-            + i * br['spf'] * br['bps']
+    br = populate_br(file(dev))
 
-    # bytes per root directory:
-    br['bprd'] = br['rdents'] * 32
-
-    # sectors per root directory:
-    br['sprd'] = (br['bprd'] + br['bps'] - 1) / br['bps']
-
-    # byte offset of root directory:
-    br['rd_offs'] = (br['rsvd_sects'] + br['n_fats'] * br['spf']) * br['bps']
-
-    # byte offsets of cluster #2 and cluster #0:
-    br['c2offs'] = br['rd_offs'] + br['sprd'] * br['bps']
-    br['c0offs'] = br['c2offs'] - 2 * br['spc'] * br['bps']
-
-    # Pre-cache the root directory:
-    dir_cache = \
-        { os.path.sep: BChain(f, [0], bsize=br['bprd'], boffs=br['rd_offs']) }
-    for path in args[1:]:
+    # pre-cache the root directory
+    dir_cache = {os.path.sep: BChain(br['dev'], [0], bsize=br['bprd'],
+                                     boffs=br['rd_offs'])}
+    for path in args:
         ls_path(br, dir_cache, path)
 
 # vi:set sw=4 et:
