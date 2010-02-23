@@ -224,42 +224,44 @@ def ls_dirents(br, de_list, base_path=None):
         print '%5s +%08x%s %s' % (
             de['attrs'], de['offs'], sz, name.encode('utf8'))
 
-def _ls_path(br, dir_cache, path_head_str, path_tail_list):
+def _ls_path(br, dir_cache, head, tail):
     global opts
-    de_list = filter(lambda x: x['type'] not in ('deld','delf','deln','lfn'),
-                     get_dirents(dir_cache[path_head_str]))
+    de_list = filter(
+        lambda x: (x['type'] not in ('deld', 'delf', 'deln', 'lfn')) \
+            and (x['name'] not in ('.', '..')),
+        get_dirents(dir_cache[head]))
 
     # sort dentries alphabetically
     de_list.sort(key=lambda x: x['name'])
 
-    if path_tail_list:
-        p, path_tail_list = path_tail_list[0], path_tail_list[1:]
-        path_head_str0 = path_head_str
-        path_head_str = os.path.join(path_head_str, p)
+    if tail:
+        p = tail.pop(0)
+        orig_head, head = head, os.path.join(head, p)
+
         for de in de_list:
             if de['type'] == 'file' and de['name'] == p:
                 if opts.recurse:
-                    return ls_dirents(br, [de], path_head_str0)
+                    return ls_dirents(br, [de], orig_head)
                 else:
                     return ls_dirents(br, [de])
             elif de['type'] == 'dir' and de['name'] == p:
                 de_clist = get_clist(br, de)
-                if path_head_str not in dir_cache:
+                if head not in dir_cache:
                     de_cchain = BChain(br['dev'], blist=de_clist,
                                        bsize=br['spc']*br['bps'],
                                        boffs=br['c0offs'])
-                    dir_cache[path_head_str] = de_cchain
-                return _ls_path(br, dir_cache, path_head_str, path_tail_list)
-        print 'ERROR: "%s" does not exist' % path_head_str
+                    dir_cache[head] = de_cchain
+                return _ls_path(br, dir_cache, head, tail)
+        print 'ERROR: "%s" does not exist' % head
     else:
         if not opts.recurse:
             return ls_dirents(br, de_list)
 
         for de in de_list:
-            ls_dirents(br, [de], path_head_str)
+            ls_dirents(br, [de], head)
             if de['type'] == 'dir' and de['name'] not in ('.', '..'):
                 de_clist = get_clist(br, de)
-                path_de_str = os.path.join(path_head_str, de['name'])
+                path_de_str = os.path.join(head, de['name'])
                 if path_de_str not in dir_cache:
                     de_cchain = BChain(br['dev'], blist=de_clist,
                                        bsize=br['spc']*br['bps'],
@@ -267,15 +269,15 @@ def _ls_path(br, dir_cache, path_head_str, path_tail_list):
                     dir_cache[path_de_str] = de_cchain
                 _ls_path(br, dir_cache, path_de_str, [])
 
-def ls_path(br, dir_cache, path_str):
-    splitpath = os.path.normcase(os.path.normpath(path_str)).split(os.path.sep)
-    if splitpath[0] == '':
-        splitpath.pop(0)
-    if splitpath[-1] in ('', '.'):
-        splitpath.pop()
-    return _ls_path(br, dir_cache, os.path.sep, splitpath)
+def ls_path(br, dir_cache, path):
+    ps = os.path.normcase(os.path.normpath(path)).split(os.path.sep)
+    if ps[0] == '':
+        ps.pop(0)
+    if ps[-1] in ('', '.'):
+        ps.pop()
+    return _ls_path(br, dir_cache, os.path.sep, ps)
 
-def populate_br(f): # XXX What does `br' stand for?  --vvv
+def mkbr(f): # XXX What does `br' stand for?  --vvv
     br = parse(BR_DICT, f.read(512))
     br['dev'] = f
     assert(br['magic'] == 0xaa55)
@@ -325,7 +327,7 @@ Type `%s -h' for usage.""" % sys.argv[0]
     if not args:
         args.append(os.path.sep)
 
-    br = populate_br(file(dev))
+    br = mkbr(file(dev))
 
     # pre-cache the root directory
     dir_cache = {os.path.sep: BChain(br['dev'], [0], bsize=br['bprd'],
