@@ -259,7 +259,7 @@ def _ls_path(br, dir_cache, head, tail):
 
         for de in de_list:
             ls_dirents(br, [de], head)
-            if de['type'] == 'dir' and de['name'] not in ('.', '..'):
+            if de['type'] == 'dir':
                 de_clist = get_clist(br, de)
                 path_de_str = os.path.join(head, de['name'])
                 if path_de_str not in dir_cache:
