@@ -185,8 +185,9 @@ def get_dirents(d_chain):
 
     return de_list
 
-# Get cluster list for the given directory entry
 def get_clist(br, de):
+    """Get cluster list for the given directory entry
+    """
     if de['type'] == 'vol':
         assert(de['size'] == 0 and de['cluster'] == 0)
         return []
@@ -196,12 +197,19 @@ def get_clist(br, de):
            or de['size'] == 0 and de['cluster'] == 0)
     fat1bchain = BChain(br['dev'], [0], bsize=br['spf']*br['bps'],
                         boffs=br['fat1offs'])
-    assert(fat1bchain.read(0, 4) == '\xf8\xff\xff\xff')
+
+    s = fat1bchain.read(0, 4)
+    if s != '\xf8\xff\xff\xff':
+        print >>sys.stderr, '*WARNING* suspicious start of FAT at 0x%x:' % \
+            br['fat1offs'],
+        print >>sys.stderr, '%02x%02x %02x%02x' % \
+            tuple([ord(s[i]) for i in range(4)])
+
     c = de['cluster']
     clist = []
     while c >= 2 and c < 0xfff7:
         clist.append(c)
-        c = struct.unpack('<H', fat1bchain.read(c * 2, 2))[0]
+        c = struct.unpack('<H', fat1bchain.read(c*2, 2))[0]
     return clist
 
 def ls_dirents(br, de_list, base_path=None):
@@ -240,19 +248,15 @@ def _ls_path(br, dir_cache, head, tail):
 
         for de in de_list:
             if de['type'] == 'file' and de['name'] == p:
-                if opts.recurse:
-                    return ls_dirents(br, [de], orig_head)
-                else:
-                    return ls_dirents(br, [de])
+                return ls_dirents(br, [de], opts.recurse and orig_head or None)
             elif de['type'] == 'dir' and de['name'] == p:
                 de_clist = get_clist(br, de)
                 if head not in dir_cache:
-                    de_cchain = BChain(br['dev'], blist=de_clist,
-                                       bsize=br['spc']*br['bps'],
-                                       boffs=br['c0offs'])
-                    dir_cache[head] = de_cchain
+                    dir_cache[head] = BChain(br['dev'], blist=de_clist,
+                                             bsize=br['spc']*br['bps'],
+                                             boffs=br['c0offs'])
                 return _ls_path(br, dir_cache, head, tail)
-        print 'ERROR: "%s" does not exist' % head
+        print '**ERROR** "%s" does not exist' % head
     else:
         if not opts.recurse:
             return ls_dirents(br, de_list)
@@ -263,10 +267,9 @@ def _ls_path(br, dir_cache, head, tail):
                 de_clist = get_clist(br, de)
                 path_de_str = os.path.join(head, de['name'])
                 if path_de_str not in dir_cache:
-                    de_cchain = BChain(br['dev'], blist=de_clist,
-                                       bsize=br['spc']*br['bps'],
-                                       boffs=br['c0offs'])
-                    dir_cache[path_de_str] = de_cchain
+                    dir_cache[path_de_str] = BChain(br['dev'], blist=de_clist,
+                                                    bsize=br['spc']*br['bps'],
+                                                    boffs=br['c0offs'])
                 _ls_path(br, dir_cache, path_de_str, [])
 
 def ls_path(br, dir_cache, path):
@@ -277,7 +280,11 @@ def ls_path(br, dir_cache, path):
         ps.pop()
     return _ls_path(br, dir_cache, os.path.sep, ps)
 
-def mkbr(f): # XXX What does `br' stand for?  --vvv
+def mkbr(f):
+    """Parse boot sector.
+
+    AFAIU, `br' is an acronym for ``boot record''.  --vvv
+    """
     br = parse(BR_DICT, f.read(512))
     br['dev'] = f
     assert(br['magic'] == 0xaa55)
